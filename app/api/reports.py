@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+import json
 
 from app.core.database import get_db
 from app.core.deps import ensure_company_access, get_current_user, require_roles
@@ -28,6 +29,7 @@ def list_reports(company_id: int, db: Session = Depends(get_db), user: User = De
             "generated_at": r.generated_at,
             "approved_at": r.approved_at,
             "reversed_at": r.reversed_at,
+        "rectification_notes": json.loads(r.rectification_notes_json or "[]"),
         }
         for r in reports
     ]
@@ -118,4 +120,5 @@ def report_detail(report_id: int, db: Session = Depends(get_db), user: User = De
         "approved_at": report.approved_at,
         "reversed_at": report.reversed_at,
         "reversal_reason": report.reversal_reason,
+        "rectification_notes": json.loads(report.rectification_notes_json or "[]"),
     }

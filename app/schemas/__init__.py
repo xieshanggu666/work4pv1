@@ -184,3 +184,71 @@ class QuotaLoanRepayIn(BaseModel):
 
 class QuotaLoanDefaultIn(BaseModel):
     reason: str = Field(min_length=2, max_length=500)
+
+
+class RectificationOrderIn(BaseModel):
+    """碳排放整改工单建单（监管登记或企业自查；可由对账差异转单）。"""
+
+    company_id: int
+    year: int | None = Field(default=None, ge=1900, le=2200)
+    title: str = Field(min_length=2, max_length=200)
+    issue_type: str = Field(
+        default="other",
+        pattern="^(activity_data|emission_factor|calculation|report|reconciliation|quota|other)$",
+    )
+    description: str = Field(default="", max_length=4000)
+    requirement: str = Field(default="", max_length=2000)
+    due_date: str = Field(default="", max_length=10)
+    source: str = Field(default="manual", pattern="^(manual|recon_discrepancy)$")
+    recon_run_id: int | None = None
+    recon_discrepancy_index: int | None = None  # 对账运行差异列表中的序号（转单时定位）
+    idempotency_key: str | None = None
+
+
+class RectificationEvidenceIn(BaseModel):
+    """企业上传整改证据材料登记（方案/整改报告/佐证文件）。"""
+
+    evidence_type: str = Field(
+        default="supporting_doc",
+        pattern="^(rectification_plan|rectification_report|supporting_doc|other)$",
+    )
+    file_name: str = Field(min_length=1, max_length=256)
+    file_url: str = Field(default="", max_length=512)
+    file_hash: str = Field(default="", max_length=128)
+    file_size: int = Field(default=0, ge=0)
+    description: str = Field(default="", max_length=1000)
+
+
+class RectificationSubmitIn(BaseModel):
+    """企业提交整改：整改情况说明、措施与数据/排放影响说明，至少一份证据。"""
+
+    summary: str = Field(min_length=2, max_length=4000)
+    measures: str = Field(default="", max_length=4000)
+    impact: str = Field(default="", max_length=2000)
+    evidences: list[RectificationEvidenceIn] | None = None  # 可选随提交一并上传
+    idempotency_key: str | None = None
+
+
+class RectificationReviewIn(BaseModel):
+    """核查员审核工单：通过（回写对账差异与履约报告）/ 驳回（需原因）。"""
+
+    comment: str = Field(default="", max_length=1000)
+    # 审核通过时是否同事务重算该企业年度排放量并刷新 MRV 草稿（默认开启）
+    recalculate: bool = True
+    # 审核通过后是否发起一次新对账复验（默认开启）
+    followup_reconcile: bool = True
+    # 关联对账差异的处置结论；默认 resolved=整改完成，可改为 waived=豁免关闭
+    resolve_discrepancy: str = Field(default="resolved", pattern="^(resolved|waived)$")
+    idempotency_key: str | None = None
+
+
+class RectificationRejectIn(BaseModel):
+    reason: str = Field(min_length=2, max_length=1000)
+
+
+class RectificationCloseIn(BaseModel):
+    """核查员/监管关闭工单（问题不成立、免予整改等，需原因）。"""
+
+    reason: str = Field(min_length=2, max_length=1000)
+    # 关联对账差异时关闭的处置口径，默认 waived=经核查豁免/问题不成立
+    resolve_discrepancy: str = Field(default="waived", pattern="^(resolved|waived)$")

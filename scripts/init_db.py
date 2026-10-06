@@ -200,12 +200,68 @@ def main():
     loan_op = LoanOperator(id=users[0].id, username="admin", role="admin")
     repay_loan(db, settled_loan.id, loan_op, amount=12000)
 
+    # ---- 碳排放整改工单演示：一张待企业整改、一张已提交待核查（含证据）----
+    from app.schemas import (
+        RectificationEvidenceIn,
+        RectificationOrderIn,
+        RectificationSubmitIn,
+    )
+    from app.services.rectification_service import (
+        Operator as RectOperator,
+        add_evidence as rect_add_evidence,
+        create_order as rect_create,
+        submit_order as rect_submit,
+    )
+
+    rect_admin = RectOperator(id=users[0].id, username="admin", role="admin")
+    rect_verifier = RectOperator(id=users[1].id, username="verifier", role="verifier")
+    rect_elec = RectOperator(
+        id=db.query(User).filter_by(username="elec").one().id,
+        username="elec", role="enterprise", company_id=companies[0].id,
+    )
+
+    # 恒固水泥：待整改（open），等待企业登录后上传证据并提交
+    rect_create(db, RectificationOrderIn(
+        company_id=companies[1].id, year=next_year,
+        title="熟料产量月报与工艺排放核算口径不一致",
+        issue_type="calculation",
+        description="第二季度熟料产量月报与排放核算取数口径不一致，存在低估工艺排放风险。",
+        requirement="核对生产月报与台账取数口径，重新核算工艺过程排放并提交佐证。",
+        due_date=f"{next_year}-11-15",
+    ), rect_verifier)
+
+    # 绿能电力：已提交待核查（submitted），含整改方案与佐证各一份
+    pending_review = rect_create(db, RectificationOrderIn(
+        company_id=companies[0].id, year=next_year,
+        title="外购电力活动数据缺部分电费结算单",
+        issue_type="activity_data",
+        description="3-4 月外购电力缺电费结算单佐证，仅有电网总表读数。",
+        requirement="补齐电费结算单或电网确认函，复核购电量后重新提交核算。",
+        due_date=f"{next_year}-10-31",
+    ), rect_admin)
+    rect_add_evidence(db, pending_review.id, RectificationEvidenceIn(
+        evidence_type="rectification_plan", file_name="外购电力数据整改方案.pdf",
+        file_url="", file_hash="", file_size=0,
+        description="按月归档电网结算单与电费发票的双轨核对方案",
+    ), rect_elec)
+    rect_add_evidence(db, pending_review.id, RectificationEvidenceIn(
+        evidence_type="supporting_doc", file_name="电网公司确认函_3-4月.pdf",
+        file_url="", file_hash="", file_size=0,
+        description="电网公司出具的 3-4 月购电量确认函",
+    ), rect_elec)
+    rect_submit(db, pending_review.id, RectificationSubmitIn(
+        summary="已补齐 3-4 月购电量佐证材料，电网确认函与总表读数一致，购电量无需调整。",
+        measures="建立月度结算单/发票/总表读数三单核对制度，专人归档。",
+        impact="复核后购电量不变，排放量核算结果无影响。",
+    ), rect_elec)
+
     db.commit()
     db.close()
     print(
         "初始化完成：2 家企业、4 个核算边界、3 个排放因子、4 条活动数据（2025）、2 份配额、"
         "2 份已批准 MRV 报告、2 条履约记录（含 1 次缺口补缴）、2026 年度配额、"
-        "1 个开放竞价场次 + 1 个草稿场次、2 张配额借贷单（1 笔待放款、1 笔在贷部分归还）"
+        "1 个开放竞价场次 + 1 个草稿场次、2 张配额借贷单（1 笔待放款、1 笔在贷部分归还）、"
+        "2 张碳排放整改工单（1 张待整改、1 张待核查含证据）"
     )
     print("账号：admin / verifier / elec / cement，密码均为 123456")
 

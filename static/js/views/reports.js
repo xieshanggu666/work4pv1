@@ -121,6 +121,15 @@ views.ReportsView = () => {
           ${detail.reversed_at ? ` ｜ 冲正：${new Date(detail.reversed_at).toLocaleString("zh-CN")}` : ""}
         </p>
         ${detail.reversal_reason && html`<p style=${{color: "var(--red)", fontSize: "12px"}}>冲正原因：${detail.reversal_reason}</p>`}
+        ${(detail.rectification_notes || []).length > 0 && html`
+          <div class="subbox" style=${{marginTop: "10px"}}>
+            <h4>整改记录（${detail.rectification_notes.length}）</h4>
+            ${detail.rectification_notes.map((n, i) => html`
+              <div key=${i} style=${{fontSize: "12px", marginBottom: "8px"}}>
+                <div><b>${n.order_no}</b> · ${n.title} · ${new Date(n.reviewed_at).toLocaleString("zh-CN")}</div>
+                ${n.review_comment ? html`<div style=${{color: "var(--text-dim)"}}>审核意见：${n.review_comment}</div>` : ""}
+              </div>`)}
+          </div>`}
         <pre style=${{background: "var(--bg-soft)", border: "1px solid var(--line)", borderRadius: "8px", padding: "14px", marginTop: "12px", overflow: "auto", fontSize: "12px"}}>${JSON.stringify(JSON.parse(detail.report_json || "{}"), null, 2)}</pre>
       </div>`}
   `;

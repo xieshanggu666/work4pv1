@@ -25,3 +25,6 @@ class MrvReport(Base):
     reversed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     reversed_at = Column(DateTime, nullable=True)
     reversal_reason = Column(Text, nullable=False, default="")
+    # 履约报告整改附注：整改工单审核通过后回写的整改结论列表（JSON，只追加），
+    # 不改动报告排放快照本身，作为履约成果文件的一部分永久留痕
+    rectification_notes_json = Column(Text, nullable=False, default="[]")

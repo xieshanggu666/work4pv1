@@ -32,6 +32,12 @@ from app.models.loan import (
     QuotaLoanAuditLog,
     QuotaLoanRepayment,
 )
+from app.models.rectification import (
+    CarbonRectificationAuditLog,
+    CarbonRectificationEvidence,
+    CarbonRectificationOrder,
+    ReconDiscrepancyResolution,
+)
 from app.models.report import MrvReport
 from app.models.user import User
 
@@ -63,4 +69,8 @@ __all__ = [
     "QuotaLoan",
     "QuotaLoanRepayment",
     "QuotaLoanAuditLog",
+    "CarbonRectificationOrder",
+    "CarbonRectificationEvidence",
+    "ReconDiscrepancyResolution",
+    "CarbonRectificationAuditLog",
 ]

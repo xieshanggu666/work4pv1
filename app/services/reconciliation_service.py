@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import uuid
@@ -97,6 +98,35 @@ def _issue(issues: list[dict], code: str, severity: str, message: str, **refs: A
 
 def _near(a: float, b: float, eps: float = _EPS) -> bool:
     return abs(float(a) - float(b)) <= eps
+
+
+# refs 中可作为差异“稳定身份”的键：剔除数值/时间等易变内容，只保留主体定位。
+# 整改工单把对账差异处置（resolved/waived）按该身份挂接，后续对账运行再次出现
+# 同一条差异时即可识别为“已处置但复发”，而历史对账运行记录本身保持不可变。
+_DISCREPANCY_IDENTITY_KEYS = (
+    "company_id", "year", "order_id", "trade_id", "session_id", "loan_id",
+    "record_id", "report_id", "account_id", "quota_status", "expected",
+    "event_type", "pair", "seq", "event_id", "tx_id", "tx_type", "count",
+)
+
+
+def discrepancy_fingerprint(issue: dict, *, company_scope: int | None = None,
+                            year_scope: int | None = None) -> str:
+    """计算一条对账差异的稳定指纹（差异代码 + 企业/年度范围 + 身份 refs）。"""
+    refs = issue.get("refs") or {}
+    identity = {
+        k: refs[k]
+        for k in _DISCREPANCY_IDENTITY_KEYS
+        if k in refs and refs[k] is not None
+    }
+    # 全量/范围对账的差异可能不带公司/年度 refs，用运行范围补全身份
+    identity.setdefault("company_id", company_scope)
+    identity.setdefault("year", year_scope)
+    raw = json.dumps(
+        {"code": issue.get("code"), "refs": identity},
+        ensure_ascii=False, sort_keys=True,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 # --------------------------------------------------------------------------- #
@@ -678,13 +708,17 @@ def check_compliance(db: Session, issues: list[dict], *,
 def check_conservation(db: Session, issues: list[dict], *,
                        company_id: int | None, year: int | None) -> dict[str, float]:
     summary: dict[str, float] = {}
-    # 6.1 内部配对：按全局/年度汇总，出入必须相等
+    # 6.1 内部配对：出入必须两两相等。系统守恒是**全平台**口径——跨主体划转的
+    # 一方被企业范围过滤后，单企业范围内出/入必然不闭合（如借贷放款划出在本企业、
+    # 到账在对方企业），因此配对平衡仅在全量（无 company_id）范围强制；
+    # 企业/年度范围仍汇总数值供参考，不报 CONSERVATION_PAIR_UNBALANCED。
+    full_scope = company_id is None
     for name, (out_type, in_type) in _PAIRS.items():
         out_total = _sum_tx(db, tx_types=(out_type,), company_id=company_id, year=year)
         in_total = _sum_tx(db, tx_types=(in_type,), company_id=company_id, year=year)
         summary[f"{name}_out"] = out_total
         summary[f"{name}_in"] = in_total
-        if not _near(out_total, in_total):
+        if full_scope and not _near(out_total, in_total):
             _issue(issues, "CONSERVATION_PAIR_UNBALANCED", "error",
                    f"{name} 划出合计 {out_total:.4f} ≠ 到账合计 {in_total:.4f}，"
                    "跨主体划转有配额凭空消失/增加",

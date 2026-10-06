@@ -13,8 +13,13 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import ensure_company_access, get_current_user, require_roles
 from app.models import AllowanceAccount, LedgerEvent, LedgerReconciliation, User
+from app.models.rectification import ReconDiscrepancyResolution
 from app.services.ledger_event_service import backfill_ledger_events
-from app.services.reconciliation_service import run_reconciliation, serialize_run
+from app.services.reconciliation_service import (
+    discrepancy_fingerprint,
+    run_reconciliation,
+    serialize_run,
+)
 from app.services.replay_service import (
     rebuild_checkpoints,
     replay_account,
@@ -24,6 +29,34 @@ from app.services.replay_service import (
 router = APIRouter(prefix="/api/ledger", tags=["ledger"])
 
 _REGULATORY = ("admin", "verifier")
+
+
+def _annotate_discrepancy_resolutions(db, run: LedgerReconciliation, item: dict) -> dict:
+    """在展示层把整改工单的对账差异处置（resolved/waived）合并到差异条目。
+
+    对账运行记录本身不可变；差异用稳定指纹（剔除易变数值）与处置单匹配，
+    因此后续运行中同一差异再次出现会显示“已处置/已豁免但复发”。
+    """
+    rows = db.query(ReconDiscrepancyResolution).all()
+    by_fp = {r.fingerprint: r for r in rows}
+    company_scope = run.company_id if run.scope == "company" else None
+    year_scope = run.year if run.scope == "year" else None
+    for issue in item.get("discrepancies", []):
+        resolution = by_fp.get(discrepancy_fingerprint(
+            issue, company_scope=company_scope, year_scope=year_scope
+        ))
+        if resolution is None:
+            continue
+        issue["resolution"] = {
+            "status": resolution.status,
+            "order_id": resolution.order_id,
+            "resolution_id": resolution.id,
+            "comment": resolution.comment,
+            "resolved_at": resolution.resolved_at.isoformat() if resolution.resolved_at else None,
+            # 处置后差异在本次运行中仍然出现：已整改/豁免但复发，需重点关注
+            "recurred": True,
+        }
+    return item
 
 
 def _scope_for_user(user: User, company_id: int | None) -> int | None:
@@ -127,7 +160,7 @@ def reconcile(
         triggered_by=user.id,
         rebuild_stale_checkpoints=rebuild_checkpoints,
     )
-    return serialize_run(run)
+    return _annotate_discrepancy_resolutions(db, run, serialize_run(run))
 
 
 @router.get("/reconciliations")
@@ -153,6 +186,7 @@ def list_reconciliations(
                 d for d in item["discrepancies"]
                 if d.get("refs", {}).get("company_id") in (None, user.company_id)
             ]
+        item = _annotate_discrepancy_resolutions(db, run, item)
         result.append(item)
     return result
 
@@ -174,7 +208,7 @@ def get_reconciliation(
             d for d in item["discrepancies"]
             if d.get("refs", {}).get("company_id") in (None, user.company_id)
         ]
-    return item
+    return _annotate_discrepancy_resolutions(db, run, item)
 
 
 @router.post("/backfill")
