@@ -184,3 +184,50 @@ class QuotaLoanRepayIn(BaseModel):
 
 class QuotaLoanDefaultIn(BaseModel):
     reason: str = Field(min_length=2, max_length=500)
+
+
+class RectificationOrderIn(BaseModel):
+    """监管/核查员开具碳排放整改工单。"""
+
+    company_id: int
+    year: int
+    title: str = Field(min_length=2, max_length=200)
+    description: str = Field(min_length=2, max_length=2000)
+    source_type: str = Field(default="manual", pattern="^(reconciliation|report|activity|manual)$")
+    reconciliation_id: int | None = None
+    report_id: int | None = None
+    activity_id: int | None = None
+    # 对账差异 code 列表（source_type=reconciliation 时按 code 圈定差异）
+    discrepancy_codes: list[str] | None = None
+    due_date: str = Field(default="", max_length=10)
+    idempotency_key: str | None = None
+
+
+class RectificationEvidenceIn(BaseModel):
+    evidence_type: str = Field(default="document", pattern="^(document|photo|data|other)$")
+    name: str = Field(min_length=1, max_length=200)
+    file_url: str = Field(default="", max_length=500)
+    remark: str = Field(default="", max_length=500)
+
+
+class RectificationSubmitIn(BaseModel):
+    """企业提交整改措施与证据（证据至少 1 条）。"""
+
+    rectification_measure: str = Field(min_length=2, max_length=2000)
+    emission_adjustment: float | None = Field(default=None)
+    evidences: list[RectificationEvidenceIn] = Field(min_length=1, max_length=50)
+    idempotency_key: str | None = None
+
+
+class RectificationReviewIn(BaseModel):
+    """核查员审核：approved=true 通过 / false 驳回（驳回须填不少于 2 字的原因）。"""
+
+    approved: bool
+    comment: str = Field(min_length=2, max_length=1000)
+    # 通过时可登记最终认定的排放调整量（缺省取企业申报值）
+    confirmed_emission_adjustment: float | None = Field(default=None)
+    idempotency_key: str | None = None
+
+
+class RectificationCloseIn(BaseModel):
+    reason: str = Field(min_length=2, max_length=500)

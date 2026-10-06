@@ -7,6 +7,7 @@ from app.models.allowance import AllowanceAccount, AllowanceTransaction, Complia
 from app.models.company import Company
 from app.models.emission import ActivityData, EmissionResult
 from app.models.loan import QuotaLoan
+from app.models.rectification import RectificationOrder
 from app.models.user import User
 
 
@@ -76,6 +77,21 @@ def dashboard_stats(db: Session, year: int | None = None, user: User | None = No
         QuotaLoan.status.in_(["overdue", "defaulted"])
     ).count()
 
+    # 碳排放整改工单：待企业整改 / 待核查审核 / 本轮已通过
+    rect_query = db.query(RectificationOrder)
+    if company_ids is not None:
+        rect_query = rect_query.filter(RectificationOrder.company_id.in_(company_ids))
+    if year is not None:
+        rect_query = rect_query.filter(RectificationOrder.year == year)
+    rect_open = rect_query.filter(RectificationOrder.status == "open").count()
+    rect_submitted = rect_query.filter(RectificationOrder.status == "submitted").count()
+    rect_rejected = rect_query.filter(RectificationOrder.status == "rejected").count()
+    rect_approved = rect_query.filter(RectificationOrder.status == "approved").count()
+    rect_closed = rect_query.filter(RectificationOrder.status == "closed").count()
+    # 待处置 = 待整改 + 被驳回待重交（企业侧）；待审核（核查侧）
+    rect_pending_company = rect_open + rect_rejected
+    rect_pending_review = rect_submitted
+
     account_id_query = db.query(AllowanceAccount.id)
     if company_ids is not None:
         account_id_query = account_id_query.filter(AllowanceAccount.company_id.in_(company_ids))
@@ -108,4 +124,13 @@ def dashboard_stats(db: Session, year: int | None = None, user: User | None = No
         "accounts": account_query.count(),
         "outstanding_loan_total": round(float(outstanding_loan_total), 4),
         "overdue_loan_count": overdue_loan_count,
+        "rectification_counts": {
+            "open": rect_open,
+            "submitted": rect_submitted,
+            "rejected": rect_rejected,
+            "approved": rect_approved,
+            "closed": rect_closed,
+            "pending_company": rect_pending_company,
+            "pending_review": rect_pending_review,
+        },
     }

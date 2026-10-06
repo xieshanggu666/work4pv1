@@ -6,7 +6,7 @@
 
 - **后端**：Python 3.10+ / FastAPI / SQLAlchemy ORM / SQLite / JWT（Cookie 认证）
 - **前端**：React 18（本地 UMD 运行时 + htm 模板引擎，无需构建工具，完全离线可用）
-- **测试**：pytest（304 项全部通过，含多线程并发、交割/结算闭环与冲正/违约回退一致性、配额借贷/到期清偿/违约追偿、以及统一账本事件链重放与对账专项）
+- **测试**：pytest（340 项全部通过，含多线程并发、交割/结算闭环与冲正/违约回退一致性、配额借贷/到期清偿/违约追偿、统一账本事件链重放与对账专项，以及碳排放整改工单全链路与回写）
 
 ## 快速开始
 
@@ -23,6 +23,8 @@ uvicorn app.main:app --reload  # 启动服务
 > **统一账本重放/对账链路升级（新增 3 张账本表：事件流/检查点/对账记录，并把五类旧业务记录回填为可重放事件）**：`python scripts/migrate_ledger_replay.py`，可重复执行。
 >
 > **配额借贷与到期清偿链路升级（新增 3 张借贷表：借贷单/归还凭据/借贷审计，并给流水与事件补 loan_id 关联列，回填后重建检查点）**：`python scripts/migrate_quota_loans.py`，可重复执行。
+>
+> **碳排放整改工单链路升级（新增 3 张表：整改工单/整改证据/整改审计；工单不产生配额流水，审核通过自动回写履约报告并触发企业年度对账）**：`python scripts/migrate_rectification.py`，可重复执行。
 
 访问 http://127.0.0.1:8000
 
@@ -55,6 +57,7 @@ uvicorn app.main:app --reload  # 启动服务
 11. **已结算成交监管冲正 / 违约回退**：监管可对已结算成交单做整笔、批量或部分数量冲正，同一事务内回退双方配额划转、按成交单流水归属精确回滚联动清缴（退还到账补缴）、同步回退履约清缴记录与配额状态并写冲正单/批次与审计；买方自由可用不足时只收回可得部分、不足登记为违约欠额（成交单 `defaulted`），买方可由监管手动追偿或在后续场次结算到账后自动追偿（`auto_recover_default`，先清缴后追偿），欠额结清后成交单转为 `reversed`；冲正批次与补缴均有幂等键，并发重复操作只生效一次；**与报告冲正顺序无关**：两条回退链路共用同一本成交单归属流水账（`auction_deficit_clear` − `auction_clear_refund`），同一吨到账补缴无论先冲报告还是先冲成交最多退还一次，系统总配额守恒
 12. **配额借贷与到期清偿**：出借/借入企业发起借贷单（出借挂出或借入求借）→ 双方确认（出借配额转为**交易占用**）→ 放款（占用出库、借入到账，同事务自动核销借入方同年度履约缺口，补扣流水 `loan_deficit_clear` 关联借贷单）→ 到期分次/足额归还（`loan_repay_out/in`，只用借入方自由可用）；监管可一键**逾期巡检**（到期日未足额自动标 `overdue`）、对逾期单**宣布违约**（登记欠额快照 `defaulted_amount`）、按借入方汇总**手动追偿**；借入方后续企业间订单交割/竞价结算配额到账时，在清缴之后**自动追偿**逾期/违约欠额（先清缴后追偿，绝不挪用履约配额，可用 `auto_recover_default=false` 关闭）；建单与归还均带幂等键，并发部分归还累计不超过借贷量；全部敏感操作与越权拒绝写 `quota_loan_audit_logs`；与交易/竞价共用同一套占用隔离不变量、同一本统一事件链与六维对账（占用必释放或出库、放款/归还出入配对、归还四处勾稽、违约快照勾稽、跨年度校验）
 13. **统一账本事件链 · 重放 · 对账**：配额流水、企业订单、集中竞价、履约清缴、冲正回退与**配额借贷**六类业务统一投影到一条只追加（append-only）的事件账（`ledger_events`，全局 `seq` 全序 + SHA-256 链式哈希），任何业务回退都以追加反向补偿事件体现，不删改旧事件；每笔流水在**同一事务**内由会话钩子自动登记事件（同生共死），旧库业务记录可由迁移脚本幂等回填为 `is_legacy=1` 历史事件（含订单/场次/报价/成交单/履约/报告/冲正批次/违约追偿/**借贷单与归还凭据**的状态时点）；账户投影支持全量重放与检查点增量重放（`ledger_checkpoints`），重放器逐笔核对落账三余额快照；对账器（`ledger_reconciliations`，每次运行可追溯、幂等重跑）做六维核对：① 事件链完整性（断序/断链/篡改）② 重放投影 vs 实际余额与账本不变量 ③ 期初+有符号流水勾稽与逐笔快照链 ④ 单据↔账本（占用必释放或出库、交割配对、冲正累计≤成交量、违约欠额=追偿、补缴不超额退还、**借贷占用闭合/放款配对/归还≤借贷量**）⑤ 履约一致（清缴/冻结/缺口/配额状态/报告归档）⑥ 系统守恒（跨主体出入账两两相等、逐年度总配额恒等）；账户按（企业, 年度）开立、余额事件强制带年度，逐年度独立重放，跨年度不串账
+14. **碳排放整改工单**：监管/核查员针对**对账差异、MRV 报告问题、活动数据核验问题或巡检手动开单**（须校验来源单据真实且归属该企业年度，对账开单可圈定差异 code）→ 企业按工单填写整改措施、申报自查排放调整量并**分轮次提交证据材料**（台账文件/影像/数据包，驳回重交轮次 +1，历史证据不删除）→ 核查员**审核通过或驳回**（驳回须填意见并退回企业重新整改，完整保留多轮轨迹）；**审核通过在同一业务事务内把整改结论（措施、认定排放调整量、审核意见）追加回写关联 MRV 履约报告 `report_json.rectifications`，随后自动触发一次企业+年度范围对账**（只读、复用统一对账链路），对账结论（balanced/discrepancy、差异数）挂接工单 `writeback_*` 字段并可由监管一键重跑，形成「对账发现差异 → 整改 → 复核」闭环；监管也可对无需整改的工单直接**关闭**（须填原因）。状态机 `open → submitted → approved/rejected →（重交）→ closed`，开单带幂等键；全部动作与每次越权拒绝写 `rectification_audit_logs`；整改不直接改配额/不改写已批准报告排放快照（排放纠正仍走核验→重算→冲正重批链路，避免在账本上开旁路）
 
 ### 统一账本事件链与对账设计要点
 
@@ -95,9 +98,9 @@ uvicorn app.main:app --reload  # 启动服务
 - **重复提交**：流水、履约记录与订单均支持幂等键（请求体 `idempotency_key` 或 `Idempotency-Key` 请求头），双击 / 超时重试只入账一次；前端提交期间禁用按钮并自动生成幂等键
 - **数据库兜底约束**：`quotas` 的 (企业, 年度) 唯一约束防止并发分配重复；活跃 `compliance_records` 的 (企业, 年度) 部分唯一索引允许冲正归档后重新批准；`trade_orders` 幂等键唯一约束防止重复挂单
 
-## 数据表（27 张）
+## 数据表（30 张）
 
-`users` `companies` `emission_scopes` `activity_data` `emission_factors` `factor_versions` `calculation_methods` `emission_results` `quotas` `allowance_accounts` `allowance_transactions` `compliance_records` `mrv_reports` `trade_orders` `quota_loans` `quota_loan_repayments` `quota_loan_audit_logs` `auction_sessions` `auction_bids` `auction_trades` `auction_trade_reversals` `auction_reversal_batches` `auction_default_repayments` `auction_audit_logs` `ledger_events` `ledger_checkpoints` `ledger_reconciliations`
+`users` `companies` `emission_scopes` `activity_data` `emission_factors` `factor_versions` `calculation_methods` `emission_results` `quotas` `allowance_accounts` `allowance_transactions` `compliance_records` `mrv_reports` `trade_orders` `quota_loans` `quota_loan_repayments` `quota_loan_audit_logs` `auction_sessions` `auction_bids` `auction_trades` `auction_trade_reversals` `auction_reversal_batches` `auction_default_repayments` `auction_audit_logs` `ledger_events` `ledger_checkpoints` `ledger_reconciliations` `rectification_orders` `rectification_evidences` `rectification_audit_logs`
 
 ## API 摘要
 
@@ -160,11 +163,18 @@ uvicorn app.main:app --reload  # 启动服务
 | POST | `/api/ledger/backfill` | 旧五类业务记录回填进事件链并重建检查点（仅 admin，幂等可重跑） |
 | POST | `/api/ledger/checkpoints/rebuild` | 全量重放重建账户检查点（仅 admin） |
 | GET | `/api/ledger/chain/head` | 事件链头部锚点（head seq / 实时与历史事件数） |
+| GET/POST | `/api/rectifications` | 整改工单列表（企业仅本企业，可按年度/状态/来源过滤）/开单（admin/verifier，支持对账/报告/活动数据来源，幂等键） |
+| GET | `/api/rectifications/{id}` | 工单详情（含分轮次证据，企业仅本企业） |
+| POST | `/api/rectifications/{id}/submit` | 企业提交整改措施+申报排放调整量+证据（至少 1 条，仅本企业） |
+| POST | `/api/rectifications/{id}/review` | 核查员审核：通过（回写履约报告并自动企业年度对账）/驳回（退回重交） |
+| POST | `/api/rectifications/{id}/rerun-writeback` | 对已通过工单重新运行企业年度对账并回写（admin/verifier） |
+| POST | `/api/rectifications/{id}/close` | 监管关闭工单（非终态，须填原因） |
+| GET | `/api/rectifications/audit-logs` | 整改监管审计记录（仅 admin/verifier，企业 403 并留痕） |
 
 ## 测试
 
 ```bash
-python -m pytest tests/ -v   # 304 passed
+python -m pytest tests/ -v   # 340 passed
 ```
 
 覆盖：核算引擎两种公式、因子按年取值、核算幂等、配额分配幂等、清缴达标/缺口与补缴、交易余额校验、MRV 状态机、API 冒烟、越权防护、企业间订单全状态机（挂单/单方及双方确认/撤销释放/交割双方入账/幂等与非法流转拒绝），以及多线程并发交易/清缴/订单（无超额扣减、占用与冻结互不挤占、流水三类快照链一致、幂等键去重、失败整体回滚、交割与撤销竞争只有一方成功、清缴与交易并发三方一致）；另有交割联动清缴闭环专项测试：足额/部分/超买补缴、纯冻结记录核销、关闭联动后手动清缴、卖方义务不被触动、重复交割只核销一次、两笔订单交割与手动清缴并发后"余额 / 流水 / 履约记录 / 仪表盘统计"四方一致且年度配额守恒（持仓 + 已清缴 = 分配总量）。
@@ -176,3 +186,5 @@ python -m pytest tests/ -v   # 304 passed
 统一账本重放与对账专项（`test_ledger_replay.py` / `test_ledger_api.py`，32 项）：分配/订单/竞价/冲正/违约全链路每笔流水同事务生成事件、事务回滚事件同灭、事件 seq 连续与哈希链勾连；全量/增量重放投影与账户三余额一致、检查点重建往返、跨年度账户独立投影；旧库清空事件链后从五类业务表幂等回填（重放结论不变、重复回填零新增、回填后实时记账不重复）；部分冲正与违约自动追偿后对账平衡、系统守恒；库外篡改余额、物理删除事件、篡改事件载荷分别被投影/断序断链/内容哈希核对检出；多线程并发交割后链不重号不断链且账实相符；API 角色边界（对账仅监管、回填仅 admin、企业事件隔离与越权 403）、对账幂等键去重、事件链游标分页。
 
 配额借贷与到期清偿专项（`test_quota_loans.py` 31 项 / `test_quota_loans_api.py` 13 项 / `test_quota_loans_ledger.py` 4 项）：出借/借入双方建单（发起方即确认）、第二方确认占用自由可用（持仓不变、reserved +量）、占用不足拒绝、重复确认幂等、建单幂等键去重；pending 撤销无副作用、confirmed 撤销释放占用且重复撤销幂等、非参与方拒绝；放款双方划转、未确认/第三方拒绝、放款到账先冻结核销后到账补缴（`loan_deficit_clear` 关联借贷单）、部分补缴留缺口、关闭 `auto_clear_deficit` 不联动；分次归还与一次性清偿、超量封顶、自由可用不足拒绝、归还幂等键重复返回首笔、未放款拒绝归还；到期巡检（到期前不标/到期标/重复幂等）、仅 overdue 可宣布违约与欠额快照、原因校验、监管汇总追偿、自由可用不足时尽力而为、补足后再次追偿结清、逾期归还 kind=overdue；订单交割到账自动追偿违约欠额（先清缴后追偿、出借/借入/第三方三账守恒）、关闭 `auto_recover_default` 不追偿；多线程并发放款只划转一次、并发部分归还写锁内重读未偿余额累计封顶 100 且系统总配额守恒；API 角色边界（仅企业发起本企业借贷、仅借入方可归还、仅 admin 巡检/违约/追偿、verifier 只读、企业列表隔离、越权 403 并写审计）、HTTP 并发归还累计不超额；借贷全链路事件同事务登记且强制带年度、全量重放投影/逐笔快照链一致、六维对账 balanced 且系统守恒、旧库清空事件链后幂等回填结论不变、库外篡改余额被对账检出。
+
+碳排放整改工单专项（`test_rectification.py` 23 项 / `test_rectification_api.py` 13 项）：手动/对账差异/报告/活动数据四类来源开单（来源单据必选且校验归属企业年度、对账差异 code 真实性、跨企业跨年度拒绝、期限格式校验、幂等键去重）；企业仅本企业可提交（措施≥2 字、证据≥1 条、仅 open/rejected 可提交、待审核重复提交拒绝）；分轮次举证（驳回重交轮次 +1、两轮证据均保留）；核查审核状态约束与意见校验（通过取认定调整量缺省回退企业申报值、驳回回 open）；审核通过同事务把整改结论 append 到 MRV 报告 `report_json.rectifications`、随后自动运行企业+年度对账并挂接工单（balanced/差异数/对账运行 id），审计覆盖开单/提交/通过/驳回/回写；监管关闭（open/rejected 可关、终态拒绝、原因校验）；全生命周期审计轨迹完整。API 角色边界（仅监管开单/审核/关闭/读审计、仅企业提交本企业工单、列表企业隔离、详情越权 403、未登录 401、越权全部 403 并写 denied 审计）、校验错误 400/422、404、状态过滤、通过后重跑对账回写。

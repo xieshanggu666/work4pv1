@@ -10,6 +10,7 @@ views.DashboardView = () => {
   if (!stats) return html`<div class="empty">加载中...</div>`;
 
   const cc = stats.compliance_counts || {};
+  const rc = stats.rectification_counts || {};
   const complianceRate =
     stats.total_results > 0
       ? ((cc.compliant / (cc.compliant + cc.deficit || 1)) * 100).toFixed(1)
@@ -25,6 +26,8 @@ views.DashboardView = () => {
       <div class="card"><div class="label">冻结配额</div><div class="value">${fmtNum(stats.frozen_total)} t</div><div class="sub">批准报告待清缴</div></div>
       <div class="card"><div class="label">在贷未偿</div><div class="value">${fmtNum(stats.outstanding_loan_total || 0)} t</div><div class="sub">${stats.overdue_loan_count || 0} 笔逾期/违约待追偿</div></div>
       <div class="card"><div class="label">履约达标率</div><div class="value">${complianceRate}%</div><div class="sub">达标 ${cc.compliant || 0} · 缺口 ${cc.deficit || 0} · 待清缴 ${cc.pending || 0}</div></div>
+      <div class="card"><div class="label">整改工单</div><div class="value">${(rc.pending_company ?? 0) + (rc.pending_review ?? 0)}</div>
+        <div class="sub">待企业整改 ${rc.pending_company ?? 0} · 待核查审核 ${rc.pending_review ?? 0} · 已通过 ${rc.approved ?? 0}</div></div>
     </div>
     <div class="panel">
       <h3>平台概况</h3>

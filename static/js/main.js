@@ -18,6 +18,7 @@ const TITLES = {
   loans: "配额借贷",
   auctions: "集中竞价市场",
   reports: "MRV 报告",
+  rectifications: "整改工单",
 };
 
 const NAV = [
@@ -31,6 +32,7 @@ const NAV = [
   ["loans", "配额借贷"],
   ["auctions", "集中竞价"],
   ["reports", "MRV 报告"],
+  ["rectifications", "整改工单"],
 ];
 
 function AppShell() {
@@ -96,6 +98,7 @@ function AppShell() {
   else if (path === "loans") view = html`<${views.LoansView} />`;
   else if (path === "auctions") view = html`<${views.AuctionView} />`;
   else if (path === "reports") view = html`<${views.ReportsView} />`;
+  else if (path === "rectifications") view = html`<${views.RectificationsView} />`;
   else view = html`<${views.DashboardView} />`;
 
   return html`

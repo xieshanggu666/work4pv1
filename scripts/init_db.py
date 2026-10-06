@@ -200,12 +200,77 @@ def main():
     loan_op = LoanOperator(id=users[0].id, username="admin", role="admin")
     repay_loan(db, settled_loan.id, loan_op, amount=12000)
 
+    # ---- 碳排放整改工单演示：一笔待整改、一笔已审核通过（已回写报告与对账）----
+    from app.services.rectification_service import (
+        Operator as RectificationOperator,
+        create_order as create_rectification,
+        review_order as review_rectification,
+        submit_rectification as submit_rectification_demo,
+    )
+
+    rect_op = RectificationOperator(id=users[0].id, username="admin", role="admin")
+    rect_verifier_op = RectificationOperator(id=users[1].id, username="verifier", role="verifier")
+    rect_ent_op = RectificationOperator(id=None, username="elec", role="enterprise")
+
+    # 恒固水泥 2025：待整改工单（企业登录后可见并提交证据）
+    create_rectification(
+        db,
+        company_id=companies[1].id,
+        year=year,
+        title="熟料产量活动数据与生产月报口径不一致",
+        description="监测计划边界与生产统计月报口径存在差异，请核实熟料产量活动量并提交佐证材料。",
+        operator=rect_op,
+        source_type="manual",
+        due_date=f"{year}-11-30",
+    )
+
+    # 绿能电力 2025：完整流转（提交 → 通过 → 自动回写履约报告与企业年度对账）
+    from app.models.report import MrvReport
+
+    approved_report = (
+        db.query(MrvReport)
+        .filter_by(company_id=companies[0].id, year=year)
+        .one()
+    )
+    approved_order = create_rectification(
+        db,
+        company_id=companies[0].id,
+        year=year,
+        title="外购电力排放因子适用年度存疑",
+        description="部分外购电量疑似误用跨年度电网因子，请重新核对因子适用区间并整改。",
+        operator=rect_verifier_op,
+        source_type="report",
+        report_id=approved_report.id,
+        due_date=f"{year}-10-31",
+    )
+    submit_rectification_demo(
+        db,
+        approved_order.id,
+        company_id=companies[0].id,
+        operator=rect_ent_op,
+        rectification_measure="已逐月核对电网结算单与因子适用区间，重算后确认适用因子无误，补充结算台账佐证。",
+        emission_adjustment=0,
+        evidences=[
+            {"evidence_type": "document", "name": f"{year}年度电网结算汇总台账", "file_url": "", "remark": "逐月电量与因子"},
+            {"evidence_type": "data", "name": "外购电重算工作底稿", "file_url": "", "remark": ""},
+        ],
+    )
+    review_rectification(
+        db,
+        approved_order.id,
+        operator=rect_verifier_op,
+        approved=True,
+        comment="佐证完整、重算口径正确，整改通过；结论已回写履约报告并完成企业年度对账复核。",
+        confirmed_emission_adjustment=0,
+    )
+
     db.commit()
     db.close()
     print(
         "初始化完成：2 家企业、4 个核算边界、3 个排放因子、4 条活动数据（2025）、2 份配额、"
         "2 份已批准 MRV 报告、2 条履约记录（含 1 次缺口补缴）、2026 年度配额、"
-        "1 个开放竞价场次 + 1 个草稿场次、2 张配额借贷单（1 笔待放款、1 笔在贷部分归还）"
+        "1 个开放竞价场次 + 1 个草稿场次、2 张配额借贷单（1 笔待放款、1 笔在贷部分归还）、"
+        "2 张整改工单（1 笔待企业整改、1 笔审核通过并回写对账）"
     )
     print("账号：admin / verifier / elec / cement，密码均为 123456")
 
